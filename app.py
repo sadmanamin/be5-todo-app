@@ -1,8 +1,9 @@
 import os
-from flask import Flask, render_template, redirect, url_for, request, make_response
+from flask import Flask, render_template, redirect, url_for, request, make_response, jsonify
 import psycopg2
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_caching import Cache
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
@@ -11,12 +12,11 @@ app = Flask(__name__)
 # app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or \
 #         'sqlite:///' + os.path.join(basedir, 'app.db')
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or \
-        'postgresql://postgres:123456@localhost:5432/flask_project'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config.from_object('config.Config')
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+cache = Cache(app)
 
 class Todo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -27,13 +27,49 @@ class Todo(db.Model):
         self.title = title
         self.complete = False
 
+@app.route('/set-cache/<country>/<capital>')
+def set_cache(country, capital):
+    cache.set(country, capital)
+    return 'Success'
+
+@app.route('/get-cache/<country>')
+def get_cache(country):
+    capital = cache.get(country)
+    return capital
+
+@app.route('/add-bulk-data')
+def bulk_data():
+
+    for i in range(1,1000):
+        todo = Todo(f'Todo {i}')
+        db.session.add(todo)
+
+    db.session.commit()
+    return redirect(url_for('home'))
+    # return 'Success'
+
 @app.route('/')
 @app.route('/<name>')
 def home(name=None):
-    todo_list = Todo.query.all()
+    data = cache.get('all-data')
+    if data is None:
+        todo_list = Todo.query.all()
+        data = []
 
-    # Todo.query.filter_by(complete=True).all()
-    return render_template('todo.html',todo_list=todo_list)
+        for todo in todo_list:
+            data.append({
+                'id': todo.id,
+                'title': todo.title,
+                'complete': todo.complete
+            })
+
+        cache.set('all-data', data)
+        return jsonify(data)
+    # return render_template('todo.html',todo_list=todo_list)
+
+    else:
+        return jsonify(data)
+
 
 
 @app.route("/add", methods=["POST"])
